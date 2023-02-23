@@ -7,11 +7,11 @@ inherit cargo
 
 # how to get i2c-slave-gpio could be as easy as but default to a git checkout:
 # SRC_URI += "crate://crates.io/i2c-slave-gpio/0.1.0"
-SRC_URI += ""
-SRCREV = ""
+SRC_URI += "git://git@github.com/Fymyte/i2c-slave-gpio.rs;protocol=ssh;nobranch=1;branch=main"
+SRCREV = "b6c3827674e6835148440a5ea10e3249782f3f8d"
 S = "${WORKDIR}/git"
 CARGO_SRC_DIR = ""
-
+PV:append = ".AUTOINC+b6c3827674"
 
 # please note if you have entries that do not begin with crate://
 # you must change them to how that package can be fetched
@@ -106,11 +106,12 @@ SRC_URI += " \
 
 # FIXME: update generateme with the real MD5 of the license file
 LIC_FILES_CHKSUM = " \
-    "
+    file://LICENSE.txt;md5=b377b220f43d747efdec40d69fcaa69d \
+"
 
 SUMMARY = "gpio based i2c slave"
 HOMEPAGE = "https://github.com/Fymyte/i2c-slave-gpio"
-LICENSE = "CLOSED"
+LICENSE = "LICENSE.txt"
 
 # includes this file if it exists but does not fail
 # this is useful for anything you may want to override from
