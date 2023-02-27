@@ -1,5 +1,5 @@
 use gpio_cdev::*;
-use quicli::prelude::*;
+use quicli::prelude::{CliResult, warn};
 use structopt::StructOpt;
 
 const I2C_CONSUMER: &str = "i2c-gpio-sqn";
@@ -30,8 +30,9 @@ fn read_addr(scl: &Line, sda: &Line) -> Result<I2COp, gpio_cdev::Error> {
             EventRequestFlags::RISING_EDGE,
             I2C_CONSUMER,
         )?
-        // Skipping the first received irq
-        .skip(1)
+        // Don't skip the first irq here because clock should be low at this point, thus dont
+        // trigger a new irq
+        // .skip(1)
         .enumerate()
     {
         return match nr {
@@ -105,7 +106,7 @@ fn nack(scl: &Line) -> Result<(), gpio_cdev::Error> {
     Ok(())
 }
 
-fn do_main(args: Cli) -> Result<(), gpio_cdev::Error> {
+fn do_main(args: Cli) -> Result<(), anyhow::Error> {
     println!("i2c-gpio-sqn");
     let mut chip = Chip::new(args.chip)?;
     let sda = chip.get_line(args.sda)?;
@@ -115,9 +116,9 @@ fn do_main(args: Cli) -> Result<(), gpio_cdev::Error> {
     // Message loop
     loop {
         println!("Waiting for start condition...");
-        wait_start(&scl, &sda)?;
+        anyhow::Context::context(wait_start(&scl, &sda), format!("wait start failed"))?;
         println!("Starting transaction");
-        match read_addr(&scl, &sda)? {
+        match anyhow::Context::context(read_addr(&scl, &sda), format!("read address failed"))? {
             I2COp::Read(addr) => {
                 println!("Detected reading at address {addr}");
                 ack(&scl, &sda)?;
