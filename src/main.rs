@@ -36,7 +36,8 @@ fn read_addr(scl: &Line, sda: &Line) -> Result<I2COp, gpio_cdev::Error> {
     {
         return match nr {
             0..=6 => {
-                addr |= sda_handle.get_value()? << nr;
+                // We shift of (6 - nr) because we receive MSB first
+                addr |= sda_handle.get_value()? << (6 - nr);
                 continue;
             }
             7 => match sda_handle.get_value()? {
@@ -83,6 +84,9 @@ fn ack(scl: &Line, sda: &Line) -> Result<(), gpio_cdev::Error> {
     .skip(1)
     .next()
     .unwrap()?;
+
+    // Move sda back to open drain. Stop driving value
+    sda.request(LineRequestFlags::OPEN_DRAIN, 0, I2C_CONSUMER)?;
 
     Ok(())
 }
