@@ -1,3 +1,5 @@
+use std::mem::size_of;
+
 use gpio_cdev::*;
 use quicli::prelude::{warn, CliResult};
 use structopt::StructOpt;
@@ -14,14 +16,19 @@ struct Cli {
     scl: u32,
 }
 
-enum I2COp {
+enum I2CSlaveOp {
     Read(u8),
     Write(u8),
 }
 
-// Only addresses on 7 bits are supported
-fn read_addr(scl: &Line, sda: &Line) -> Result<I2COp, gpio_cdev::Error> {
-    let mut addr: u8 = 0;
+/// read_byte reads 8 bits from i2c
+/// `skip_first` allows to consider the first irq received as spurious and skip it.
+/// This is needed because the controller gpio controller raise an irq when enabled if the line is
+/// already high and RISING_EDGE or LEVEL_HIGH is requested, or line is low and FALLING_EDGE or
+/// LEVEL_LOW is requested.
+fn read_byte(scl: &Line, sda: &Line, skip_first: bool) -> Result<u8, gpio_cdev::Error> {
+    let mut byte: u8 = 0;
+    let byte_size = size_of::<u8>();
 
     let sda_handle = sda.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
     for (nr, _event) in scl
@@ -30,26 +37,26 @@ fn read_addr(scl: &Line, sda: &Line) -> Result<I2COp, gpio_cdev::Error> {
             EventRequestFlags::RISING_EDGE,
             I2C_CONSUMER,
         )?
-        // Don't skip the first irq here because clock should be low at this point, thus dont
-        // trigger a new irq
-        // .skip(1)
+        // Only take the next 8 events for 1 byte
+        .take(byte_size)
+        .skip(if skip_first { 1 } else { 0 })
         .enumerate()
     {
-        return match nr {
-            0..=6 => {
-                // We shift of (6 - nr) because we receive MSB first
-                addr |= sda_handle.get_value()? << (6 - nr);
-                continue;
-            }
-            7 => match sda_handle.get_value()? {
-                1 => Ok(I2COp::Write(addr)),
-                _ => Ok(I2COp::Read(addr)),
-            },
-            _ => panic!("read address overflow"),
-        };
+        // We shift of (7 - nr) because we receive MSB first
+        byte |= sda_handle.get_value()? << (byte_size - 1 - nr);
     }
 
-    Ok(I2COp::Read(addr))
+    Ok(byte)
+}
+
+// Only addresses on 7 bits are supported
+fn read_addr(scl: &Line, sda: &Line) -> Result<I2CSlaveOp, gpio_cdev::Error> {
+    // Don't skip the first byte here because the this should be low at this point, and reading
+    // a byte is triggered on RISING_EDGE.
+    Ok(match read_byte(scl, sda, false)? {
+        write_addr if (write_addr & 1) == 1 => I2CSlaveOp::Write(write_addr >> 1),
+        read_addr => I2CSlaveOp::Read(read_addr >> 1),
+    })
 }
 
 fn wait_start(scl: &Line, sda: &Line) -> Result<(), gpio_cdev::Error> {
@@ -119,15 +126,21 @@ fn do_main(args: Cli) -> Result<(), anyhow::Error> {
         anyhow::Context::context(wait_start(&scl, &sda), format!("wait start failed"))?;
         println!("Starting transaction");
         match anyhow::Context::context(read_addr(&scl, &sda), format!("read address failed"))? {
-            I2COp::Read(addr) => {
+            I2CSlaveOp::Read(addr) => {
                 println!("Detected reading at address {addr}");
-                anyhow::Context::context(ack(&scl, &sda), format!("ack failed"))?;
+                anyhow::Context::context(ack(&scl, &sda), format!("ack address failed"))?;
                 println!("acked address");
-                warn!("Reading is not implemented yet");
-                anyhow::Context::context(nack(&scl), format!("ack failed"))?;
-                println!("nacked message");
+                let byte = anyhow::Context::context(
+                    read_byte(&scl, &sda, true),
+                    format!("reading requested byte failed"),
+                )?;
+                println!("received byte: {} (str: {})", byte, byte.to_string());
+                anyhow::Context::context(ack(&scl, &sda), format!("ack received failed"))?;
+                println!("acked acked message");
+                // anyhow::Context::context(nack(&scl), format!("ack failed"))?;
+                // println!("nacked message");
             }
-            I2COp::Write(addr) => {
+            I2CSlaveOp::Write(addr) => {
                 println!("Detected writting at address {addr}");
                 anyhow::Context::context(ack(&scl, &sda), format!("ack failed"))?;
                 println!("acked address");
