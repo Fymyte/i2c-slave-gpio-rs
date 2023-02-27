@@ -1,5 +1,5 @@
 use gpio_cdev::*;
-use quicli::prelude::{CliResult, warn};
+use quicli::prelude::{warn, CliResult};
 use structopt::StructOpt;
 
 const I2C_CONSUMER: &str = "i2c-gpio-sqn";
@@ -87,7 +87,7 @@ fn ack(scl: &Line, sda: &Line) -> Result<(), gpio_cdev::Error> {
     .unwrap()?;
 
     // Move sda back to open drain. Stop driving value
-    sda.request(LineRequestFlags::OPEN_DRAIN, 0, I2C_CONSUMER)?;
+    sda.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
 
     Ok(())
 }
@@ -121,18 +121,18 @@ fn do_main(args: Cli) -> Result<(), anyhow::Error> {
         match anyhow::Context::context(read_addr(&scl, &sda), format!("read address failed"))? {
             I2COp::Read(addr) => {
                 println!("Detected reading at address {addr}");
-                ack(&scl, &sda)?;
+                anyhow::Context::context(ack(&scl, &sda), format!("ack failed"))?;
                 println!("acked address");
                 warn!("Reading is not implemented yet");
-                nack(&scl)?;
+                anyhow::Context::context(nack(&scl), format!("ack failed"))?;
                 println!("nacked message");
             }
             I2COp::Write(addr) => {
                 println!("Detected writting at address {addr}");
-                ack(&scl, &sda)?;
+                anyhow::Context::context(ack(&scl, &sda), format!("ack failed"))?;
                 println!("acked address");
                 warn!("Writting is not implemented yet");
-                nack(&scl)?;
+                anyhow::Context::context(nack(&scl), format!("ack failed"))?;
                 println!("nacked message");
             }
         }
