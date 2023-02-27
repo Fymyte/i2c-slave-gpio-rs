@@ -30,6 +30,8 @@ fn read_addr(scl: &Line, sda: &Line) -> Result<I2COp, gpio_cdev::Error> {
             EventRequestFlags::RISING_EDGE,
             I2C_CONSUMER,
         )?
+        // Skipping the first received irq
+        .skip(1)
         .enumerate()
     {
         return match nr {
@@ -51,11 +53,14 @@ fn read_addr(scl: &Line, sda: &Line) -> Result<I2COp, gpio_cdev::Error> {
 fn wait_start(scl: &Line, sda: &Line) -> Result<(), gpio_cdev::Error> {
     let scl_handle = scl.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
 
-    for _event in sda.events(
-        LineRequestFlags::INPUT,
-        EventRequestFlags::FALLING_EDGE,
-        I2C_CONSUMER,
-    )? {
+    for _event in sda
+        .events(
+            LineRequestFlags::INPUT,
+            EventRequestFlags::FALLING_EDGE,
+            I2C_CONSUMER,
+        )?
+        .skip(1)
+    {
         return match scl_handle.get_value() {
             Ok(1) => Ok(()),
             _ => continue,
@@ -75,6 +80,7 @@ fn ack(scl: &Line, sda: &Line) -> Result<(), gpio_cdev::Error> {
         EventRequestFlags::RISING_EDGE,
         I2C_CONSUMER,
     )?
+    .skip(1)
     .next()
     .unwrap()?;
 
@@ -87,7 +93,10 @@ fn nack(scl: &Line) -> Result<(), gpio_cdev::Error> {
         LineRequestFlags::INPUT,
         EventRequestFlags::RISING_EDGE,
         I2C_CONSUMER,
-    )?.next().unwrap()?;
+    )?
+    .skip(1)
+    .next()
+    .unwrap()?;
 
     Ok(())
 }
