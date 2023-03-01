@@ -2,11 +2,20 @@ use std::{fmt::Display, mem::size_of};
 
 use anyhow::Context;
 use gpio_cdev::*;
-use quicli::prelude::{warn, CliResult};
+use log;
+use quicli::prelude::CliResult;
 use structopt::StructOpt;
 use thiserror::Error;
 
 const I2C_CONSUMER: &str = "i2c-gpio-sqn";
+
+/// # IRQ quirks
+///
+///                 Line
+///           |         | LOW | HIGH |
+///           |---------|-----|------|
+/// Requiered | RISING  |  -  |  x   |
+///           | FALLING |  x  |  x   |
 
 #[derive(Debug, StructOpt)]
 struct Cli {
@@ -44,8 +53,10 @@ fn read_byte(scl: &Line, sda: &Line, skip_first: bool) -> Result<u8, gpio_cdev::
         .take(byte_size)
         .enumerate()
     {
+        let value = sda_handle.get_value()?;
         // We shift of (7 - nr) because we receive MSB first
-        byte |= sda_handle.get_value()? << (byte_size - 1 - nr);
+        byte |= value << (byte_size - 1 - nr);
+        log::debug!("read bit: {value} (byte: {byte:x?})");
     }
 
     Ok(byte)
@@ -62,7 +73,7 @@ fn read_addr(scl: &Line, sda: &Line) -> Result<I2CSlaveOp, gpio_cdev::Error> {
 }
 
 fn wait_start(scl: &Line, sda: &Line) -> Result<(), gpio_cdev::Error> {
-    let scl_handle = scl.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
+    let scl_handle = scl_release(scl)?;
 
     for _event in sda
         .events(
@@ -70,8 +81,7 @@ fn wait_start(scl: &Line, sda: &Line) -> Result<(), gpio_cdev::Error> {
             EventRequestFlags::FALLING_EDGE,
             I2C_CONSUMER,
         )?
-        // Here we want to skip the first raised irq because scl is inherently high when waiting
-        // for a start condition
+        // Skip because falling edge
         .skip(1)
     {
         return match scl_handle.get_value() {
@@ -81,6 +91,16 @@ fn wait_start(scl: &Line, sda: &Line) -> Result<(), gpio_cdev::Error> {
     }
 
     Ok(())
+}
+
+#[allow(unused)]
+fn scl_low(scl: &Line) -> Result<LineHandle, gpio_cdev::Error> {
+    scl.request(LineRequestFlags::OUTPUT, 0, I2C_CONSUMER)
+}
+
+fn scl_release(scl: &Line) -> Result<LineHandle, gpio_cdev::Error> {
+    // Move scl back to open drain. Stop driving value
+    scl.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)
 }
 
 #[derive(Debug, Error)]
@@ -102,10 +122,7 @@ impl Display for AckError {
     }
 }
 
-fn ack(scl: &Line, sda: &Line) -> Result<(), anyhow::Error> {
-    // Request the sda line to low
-    sda.request(LineRequestFlags::OUTPUT, 0, I2C_CONSUMER)?;
-
+fn wait_up_down_cycle(scl: &Line) -> Result<(), anyhow::Error> {
     // Wait for the next clock edge
     scl.events(
         LineRequestFlags::INPUT,
@@ -118,6 +135,27 @@ fn ack(scl: &Line, sda: &Line) -> Result<(), anyhow::Error> {
     .context("failed to wait for next rising edge")?
     .context("gpio error while waiting for rising edge")?;
 
+    // And now wait for scl to return to low
+    scl.events(
+        LineRequestFlags::INPUT,
+        EventRequestFlags::FALLING_EDGE,
+        I2C_CONSUMER,
+    )?
+    // Skip because falling edge
+    .skip(1)
+    .next()
+    .context("failed to wait for next rising edge")?
+    .context("gpio error while waiting for rising edge")?;
+
+    Ok(())
+}
+
+fn ack(scl: &Line, sda: &Line) -> Result<(), anyhow::Error> {
+    // Request the sda line to low
+    sda.request(LineRequestFlags::OUTPUT, 0, I2C_CONSUMER)?;
+
+    wait_up_down_cycle(scl).with_context(|| AckError::Ack)?;
+
     // Move sda back to open drain. Stop driving value
     sda.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
 
@@ -125,51 +163,44 @@ fn ack(scl: &Line, sda: &Line) -> Result<(), anyhow::Error> {
 }
 
 fn nack(scl: &Line) -> Result<(), anyhow::Error> {
-    // Just wait for the next clock edge, leaving sda to high
-    scl.events(
-        LineRequestFlags::INPUT,
-        EventRequestFlags::RISING_EDGE,
-        I2C_CONSUMER,
-    )?
-    // Don't skip because scl should be low at this point
-    .next()
-    .ok_or(AckError::Nack)
-    .context("failed to wait for next rising edge")?
-    .context("gpio error while waiting for rising edge")?;
-
-    Ok(())
+    wait_up_down_cycle(scl).with_context(|| AckError::Nack)
 }
 
 fn do_main(args: Cli) -> Result<(), anyhow::Error> {
     let mut chip = Chip::new(args.chip)?;
+
+    // Configure lines as input by default
     let sda = chip.get_line(args.sda)?;
     let scl = chip.get_line(args.scl)?;
-    println!("chip: {:?}, sda: {:?}, scl: {:?}", chip, sda, scl);
+    sda.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
+    scl.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
+    log::debug!("chip: {:?}, sda: {:?}, scl: {:?}", chip, sda, scl);
 
     // Message loop
     loop {
-        println!("Waiting for start condition...");
+        log::info!("Waiting for start condition...");
         wait_start(&scl, &sda).context("wait start failed")?;
-        println!("Starting transaction");
+        log::info!("Starting transaction");
+
         match read_addr(&scl, &sda).context("read address failed")? {
             I2CSlaveOp::Read(addr) => {
-                println!("Detected reading at address {addr}");
+                log::debug!("Detected reading at address {addr}");
                 ack(&scl, &sda).context("ack address failed")?;
-                println!("acked address");
+                log::debug!("acked address");
                 let byte = read_byte(&scl, &sda, true).context("reading requested byte failed")?;
-                println!("received byte: {} (str: {})", byte, byte.to_string());
+                log::debug!("received byte: {} (str: {})", byte, byte.to_string());
                 ack(&scl, &sda).context("ack failed")?;
-                println!("acked message");
+                log::debug!("acked message");
                 // println!("nacked message");
                 // nack(&scl).context(format!("ack failed"))?;
             }
             I2CSlaveOp::Write(addr) => {
-                println!("Detected writting at address {addr}");
+                log::debug!("Detected writting at address {addr}");
                 ack(&scl, &sda).context("ack failed")?;
-                println!("acked address");
-                warn!("Writting is not implemented yet");
+                log::debug!("acked address");
+                log::warn!("Writting is not implemented yet");
                 nack(&scl).context("ack failed")?;
-                println!("nacked message");
+                log::debug!("nacked message");
             }
         }
     }
@@ -188,7 +219,7 @@ fn do_main(args: Cli) -> Result<(), anyhow::Error> {
 fn main() -> CliResult {
     let args = Cli::from_args();
     do_main(args).or_else(|e| {
-        println!("error: {}", e);
+        log::error!("error: {}", e);
         Ok(())
     })
 }

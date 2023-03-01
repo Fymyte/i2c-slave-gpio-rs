@@ -309,6 +309,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gpio-cdev",
+ "log",
  "quicli",
  "structopt 0.3.26",
  "thiserror",
