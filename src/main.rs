@@ -37,7 +37,7 @@ enum I2CSlaveOp {
 /// This is needed because the controller gpio controller raise an irq when enabled if the line is
 /// already high and RISING_EDGE or LEVEL_HIGH is requested, or line is low and FALLING_EDGE or
 /// LEVEL_LOW is requested.
-fn read_byte(scl: &Line, sda: &Line, skip_first: bool) -> Result<u8, gpio_cdev::Error> {
+fn read_byte(scl: &Line, sda: &Line/* , skip_first: bool */) -> Result<u8, gpio_cdev::Error> {
     let mut byte: u8 = 0;
     let byte_size = size_of::<u8>() * 8;
 
@@ -48,7 +48,7 @@ fn read_byte(scl: &Line, sda: &Line, skip_first: bool) -> Result<u8, gpio_cdev::
             EventRequestFlags::RISING_EDGE,
             I2C_CONSUMER,
         )?
-        .skip(if skip_first { 1 } else { 0 })
+        // .skip(if skip_first { 1 } else { 0 })
         // Only take the next 8 events for 1 byte
         .take(byte_size)
         .enumerate()
@@ -66,7 +66,7 @@ fn read_byte(scl: &Line, sda: &Line, skip_first: bool) -> Result<u8, gpio_cdev::
 fn read_addr(scl: &Line, sda: &Line) -> Result<I2CSlaveOp, gpio_cdev::Error> {
     // Don't skip the first byte here because scl should be low at this point, and reading
     // a byte is triggered on RISING_EDGE.
-    Ok(match read_byte(scl, sda, false)? {
+    Ok(match read_byte(scl, sda/* , false */)? {
         write_addr if (write_addr & 1) == 1 => I2CSlaveOp::Write(write_addr >> 1),
         read_addr => I2CSlaveOp::Read(read_addr >> 1),
     })
@@ -82,7 +82,7 @@ fn wait_start(scl: &Line, sda: &Line) -> Result<(), gpio_cdev::Error> {
             I2C_CONSUMER,
         )?
         // Skip because falling edge
-        .skip(1)
+        // .skip(1)
     {
         return match scl_handle.get_value() {
             Ok(1) => Ok(()),
@@ -141,8 +141,8 @@ fn wait_up_down_cycle(scl: &Line) -> Result<(), anyhow::Error> {
         EventRequestFlags::FALLING_EDGE,
         I2C_CONSUMER,
     )?
-    // Skip because falling edge
-    .skip(1)
+    // Skip because switching pollarity
+    // .skip(1)
     .next()
     .context("failed to wait for next rising edge")?
     .context("gpio error while waiting for rising edge")?;
@@ -187,7 +187,7 @@ fn do_main(args: Cli) -> Result<(), anyhow::Error> {
                 log::debug!("Detected reading at address {addr}");
                 ack(&scl, &sda).context("ack address failed")?;
                 log::debug!("acked address");
-                let byte = read_byte(&scl, &sda, true).context("reading requested byte failed")?;
+                let byte = read_byte(&scl, &sda/* , true */).context("reading requested byte failed")?;
                 log::debug!("received byte: {} (str: {})", byte, byte.to_string());
                 ack(&scl, &sda).context("ack failed")?;
                 log::debug!("acked message");
