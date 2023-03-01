@@ -30,7 +30,7 @@ enum I2CSlaveOp {
 /// LEVEL_LOW is requested.
 fn read_byte(scl: &Line, sda: &Line, skip_first: bool) -> Result<u8, gpio_cdev::Error> {
     let mut byte: u8 = 0;
-    let byte_size = size_of::<u8>();
+    let byte_size = size_of::<u8>() * 8;
 
     let sda_handle = sda.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
     for (nr, _event) in scl
@@ -39,9 +39,9 @@ fn read_byte(scl: &Line, sda: &Line, skip_first: bool) -> Result<u8, gpio_cdev::
             EventRequestFlags::RISING_EDGE,
             I2C_CONSUMER,
         )?
+        .skip(if skip_first { 1 } else { 0 })
         // Only take the next 8 events for 1 byte
         .take(byte_size)
-        .skip(if skip_first { 1 } else { 0 })
         .enumerate()
     {
         // We shift of (7 - nr) because we receive MSB first
