@@ -56,7 +56,7 @@ fn read_byte(scl: &Line, sda: &Line/* , skip_first: bool */) -> Result<u8, gpio_
         let value = sda_handle.get_value()?;
         // We shift of (7 - nr) because we receive MSB first
         byte |= value << (byte_size - 1 - nr);
-        log::debug!("read bit: {value} (byte: {byte:x?})");
+        log::info!("read bit: {value} (byte: {byte:x?})");
     }
 
     Ok(byte)
@@ -174,7 +174,7 @@ fn do_main(args: Cli) -> Result<(), anyhow::Error> {
     let scl = chip.get_line(args.scl)?;
     sda.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
     scl.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
-    log::debug!("chip: {:?}, sda: {:?}, scl: {:?}", chip, sda, scl);
+    log::info!("chip: {:?}, sda: {:?}, scl: {:?}", chip, sda, scl);
 
     // Message loop
     loop {
@@ -184,23 +184,23 @@ fn do_main(args: Cli) -> Result<(), anyhow::Error> {
 
         match read_addr(&scl, &sda).context("read address failed")? {
             I2CSlaveOp::Read(addr) => {
-                log::debug!("Detected reading at address {addr}");
+                log::info!("Detected reading at address {addr}");
                 ack(&scl, &sda).context("ack address failed")?;
-                log::debug!("acked address");
+                log::info!("acked address");
                 let byte = read_byte(&scl, &sda/* , true */).context("reading requested byte failed")?;
-                log::debug!("received byte: {} (str: {})", byte, byte.to_string());
+                log::info!("received byte: {} (str: {})", byte, byte.to_string());
                 ack(&scl, &sda).context("ack failed")?;
-                log::debug!("acked message");
+                log::info!("acked message");
                 // println!("nacked message");
                 // nack(&scl).context(format!("ack failed"))?;
             }
             I2CSlaveOp::Write(addr) => {
-                log::debug!("Detected writting at address {addr}");
+                log::info!("Detected writting at address {addr}");
                 ack(&scl, &sda).context("ack failed")?;
-                log::debug!("acked address");
+                log::info!("acked address");
                 log::warn!("Writting is not implemented yet");
                 nack(&scl).context("ack failed")?;
-                log::debug!("nacked message");
+                log::info!("nacked message");
             }
         }
     }
