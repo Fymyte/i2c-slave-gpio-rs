@@ -58,7 +58,7 @@ fn main() -> CliResult {
     env_logger::init();
     let args = Cli::from_args();
     do_main(args).or_else(|e| {
-        log::error!("error: {:#}", e);
+        log::error!("error: {:?}", e);
         Ok(())
     })
 }
