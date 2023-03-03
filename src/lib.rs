@@ -106,10 +106,10 @@ pub enum I2CSlaveOp {
 
 #[derive(Debug)]
 pub struct I2cGpioLine {
-    line: Line,
-    dir: Option<LineDirection>,
-    handle: LineHandle,
     name: String,
+    dir: Option<LineDirection>,
+    line: Line,
+    handle: LineHandle,
 }
 
 impl I2cGpioLine {
