@@ -2,7 +2,6 @@ mod i2cslave;
 
 use anyhow::Context;
 use gpio_cdev::Chip;
-use log;
 use quicli::prelude::CliResult;
 use structopt::StructOpt;
 
@@ -23,37 +22,38 @@ fn do_main(args: Cli) -> Result<(), anyhow::Error> {
 
     let mut i2c_slave = I2cGpioSlave::new(&mut chip, args.sda, args.scl)?;
 
-    log::info!("slave: {i2c_slave:?}");
+    log::debug!("slave: {i2c_slave:?}");
 
     // Message loop
     loop {
         log::info!("Waiting for start condition...");
         i2c_slave.wait_start().context("wait start error")?;
-        log::info!("Starting transaction");
+        log::debug!("Starting transaction");
 
         match i2c_slave.read_addr().context("read address failed")? {
             I2CSlaveOp::Read(addr) => {
                 log::info!("Detected reading at address {addr}");
                 i2c_slave.ack().context("ack address failed")?;
-                log::info!("acked address");
+                log::debug!("acked address");
                 let byte = i2c_slave.read_byte().context("reading requested byte failed")?;
                 log::info!("received byte: {} (str: {})", byte, byte.to_string());
                 i2c_slave.ack().context("ack failed")?;
-                log::info!("acked message");
+                log::debug!("acked message");
             }
             I2CSlaveOp::Write(addr) => {
                 log::info!("Detected writting at address {addr}");
                 i2c_slave.ack().context("ack failed")?;
-                log::info!("acked address");
+                log::debug!("acked address");
                 log::warn!("Writting is not implemented yet");
                 i2c_slave.nack().map_err(|_| AckError::Nack).context("nack failed")?;
-                log::info!("nacked message");
+                log::debug!("nacked message");
             }
         }
     }
 }
 
 fn main() -> CliResult {
+    env_logger::init();
     let args = Cli::from_args();
     do_main(args).or_else(|e| {
         log::error!("error: {}", e);
