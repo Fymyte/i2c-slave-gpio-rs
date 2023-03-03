@@ -1,11 +1,7 @@
-mod i2cslave;
-
-use anyhow::Context;
 use gpio_cdev::Chip;
+use i2c_slave_gpio::{I2CSlaveOp, I2cGpioSlave};
 use quicli::prelude::CliResult;
 use structopt::StructOpt;
-
-use crate::i2cslave::{I2cGpioSlave, I2CSlaveOp, AckError};
 
 #[derive(Debug, StructOpt)]
 struct Cli {
@@ -20,6 +16,8 @@ struct Cli {
 fn do_main(args: Cli) -> Result<(), anyhow::Error> {
     let mut chip = Chip::new(args.chip)?;
 
+    let mut last_read_byte = 1_u8;
+
     let mut i2c_slave = I2cGpioSlave::new(&mut chip, args.sda, args.scl)?;
 
     log::debug!("slave: {i2c_slave:?}");
@@ -27,25 +25,29 @@ fn do_main(args: Cli) -> Result<(), anyhow::Error> {
     // Message loop
     loop {
         log::info!("Waiting for start condition...");
-        i2c_slave.wait_start().context("wait start error")?;
+        i2c_slave.wait_start()?;
         log::debug!("Starting transaction");
 
-        match i2c_slave.read_addr().context("read address failed")? {
+        match i2c_slave.read_addr()? {
             I2CSlaveOp::Read(addr) => {
                 log::info!("Detected reading at address {addr}");
-                i2c_slave.ack().context("ack address failed")?;
+                i2c_slave.ack()?;
                 log::debug!("acked address");
-                let byte = i2c_slave.read_byte().context("reading requested byte failed")?;
-                log::info!("received byte: {} (str: {})", byte, byte.to_string());
-                i2c_slave.ack().context("ack failed")?;
+                last_read_byte = i2c_slave.read_byte()?;
+                log::info!(
+                    "received byte: {} (char: {})",
+                    last_read_byte,
+                    last_read_byte as char
+                );
+                i2c_slave.ack()?;
                 log::debug!("acked message");
             }
             I2CSlaveOp::Write(addr) => {
                 log::info!("Detected writting at address {addr}");
-                i2c_slave.ack().context("ack failed")?;
+                i2c_slave.ack()?;
                 log::debug!("acked address");
-                log::warn!("Writting is not implemented yet");
-                i2c_slave.nack().map_err(|_| AckError::Nack).context("nack failed")?;
+                i2c_slave.write_byte(last_read_byte)?;
+                i2c_slave.nack()?;
                 log::debug!("nacked message");
             }
         }
@@ -56,7 +58,7 @@ fn main() -> CliResult {
     env_logger::init();
     let args = Cli::from_args();
     do_main(args).or_else(|e| {
-        log::error!("error: {}", e);
+        log::error!("error: {:#}", e);
         Ok(())
     })
 }
