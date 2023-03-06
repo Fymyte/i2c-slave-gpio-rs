@@ -48,9 +48,9 @@ impl I2cGpioError {
         .into()
     }
 
-    fn info_error(line_info: LineErrorInfo) -> Self {
-        I2cGpioErrorKind::LineInfoError(line_info).into()
-    }
+    // fn info_error(line_info: LineErrorInfo) -> Self {
+    //     I2cGpioErrorKind::LineInfoError(line_info).into()
+    // }
 
     fn wait_start_error() -> Self {
         I2cGpioErrorKind::WaitStartError.into()
@@ -129,14 +129,14 @@ pub struct GpioLine {
 }
 
 impl GpioLine {
-    fn new(line: Line, name: String) -> Result<Self, gpio_cdev::Error> {
-        let handle = line.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
-        Ok(Self {
-            name,
-            line,
-            handle: HandleVariant::Normal(handle, LineDirection::In),
-        })
-    }
+    // fn new(line: Line, name: String) -> Result<Self, gpio_cdev::Error> {
+    //     let handle = line.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
+    //     Ok(Self {
+    //         name,
+    //         line,
+    //         handle: HandleVariant::Normal(handle, LineDirection::In),
+    //     })
+    // }
 
     // pub fn direction(&self) -> Option<LineDirection> {
     //     self.dir
@@ -274,7 +274,7 @@ impl GpioLine {
                         .with_context(|| {
                             I2cGpioError::request_error(
                                 (self.name.as_str(), self.line.offset()).into(),
-                                Some(" (requested rising edge)".to_owned()),
+                                Some(" (requested falling edge)".to_owned()),
                             )
                         })?,
                     EventType::FallingEdge,
@@ -291,8 +291,10 @@ impl GpioLine {
 
 #[derive(Debug)]
 pub struct I2cGpioSlave {
-    scl: GpioLine,
-    sda: GpioLine,
+    // scl: GpioLine,
+    // sda: GpioLine,
+    scl: Line,
+    sda: Line,
     // buffer: Vec<u8>,
 }
 
@@ -301,27 +303,34 @@ impl I2cGpioSlave {
         let scl_line = chip.get_line(scl)?;
         let sda_line = chip.get_line(sda)?;
         Ok(Self {
-            scl: GpioLine::new(scl_line, String::from("scl"))?,
-            sda: GpioLine::new(sda_line, String::from("sda"))?,
+            scl: scl_line,
+            sda: sda_line,
+            // scl: GpioLine::new(scl_line, String::from("scl"))?,
+            // sda: GpioLine::new(sda_line, String::from("sda"))?,
             // buffer: String::from("Hello, World").into(),
         })
     }
 
     pub fn wait_start(&mut self) -> Result<(), anyhow::Error> {
         log::debug!("before scl input");
-        self.scl
-            .input()
+        let scl_handle = self
+            .scl
+            .request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)
             .with_context(|| I2cGpioError::wait_start_error())?;
         log::debug!("after scl input");
 
         // Wait for sda to drop to low with scl still high
         for _event in self
             .sda
-            .falling_edge()
+            .events(
+                LineRequestFlags::INPUT,
+                EventRequestFlags::FALLING_EDGE,
+                I2C_CONSUMER,
+            )
             .with_context(|| I2cGpioError::wait_start_error())?
         {
             log::debug!("in loop for falling edge");
-            return match self.scl.get_value() {
+            return match scl_handle.get_value() {
                 // Sda dropped low and scl is still high => Start condition
                 Ok(1) => Ok(()),
                 _ => continue,
@@ -334,11 +343,19 @@ impl I2cGpioSlave {
     pub fn write_byte(&mut self, byte: u8) -> Result<(), anyhow::Error> {
         // Send MSB first
         let mut line_value = (byte >> 7) & 1;
-        self.sda.output(line_value)?;
+        let sda_handle = self
+            .sda
+            .request(LineRequestFlags::OUTPUT, line_value, I2C_CONSUMER)?;
+        // self.sda.output(line_value)?;
 
         for (nr, _event) in self
             .scl
-            .rising_edge()
+            .events(
+                LineRequestFlags::INPUT,
+                EventRequestFlags::RISING_EDGE,
+                I2C_CONSUMER,
+            )
+            // .rising_edge()
             .with_context(|| I2cGpioError::write_byte_error(byte))?
             // Only seven, we already sent the first bit earlier
             .take(7)
@@ -349,13 +366,14 @@ impl I2cGpioSlave {
                 (before, now) if before == now => (),
                 (_, now) => {
                     line_value = now;
-                    self.sda.set_value(now)?
+                    sda_handle.set_value(now)?
                 }
             };
         }
 
+        drop(sda_handle);
         // Release sda. Stop driving value
-        self.sda.input()?;
+        self.sda.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
 
         Ok(())
     }
@@ -364,17 +382,23 @@ impl I2cGpioSlave {
         let mut byte: u8 = 0;
         let byte_size = size_of::<u8>() * 8;
 
-        self.sda.input()?;
+        let sda_handle = self.sda.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
+        // self.sda.input()?;
 
         // Read sda on the next 8 scl rising edge
         for (nr, _event) in self
             .scl
-            .rising_edge()
+            .events(
+                LineRequestFlags::INPUT,
+                EventRequestFlags::RISING_EDGE,
+                I2C_CONSUMER,
+            )
+            // .rising_edge()
             .with_context(|| I2cGpioError::read_byte_error())?
             .take(byte_size)
             .enumerate()
         {
-            let value = self.sda.get_value()?;
+            let value = sda_handle.get_value()?;
             // We shift of (7 - nr) because we receive MSB first
             byte |= value << (byte_size - 1 - nr);
             log::info!("read bit: {value} (byte: {byte:x?})");
@@ -386,13 +410,21 @@ impl I2cGpioSlave {
     fn wait_up_down_cycle(&mut self) -> Result<(), anyhow::Error> {
         // Wait for the next clock edge
         self.scl
-            .rising_edge()?
+            .events(
+                LineRequestFlags::INPUT,
+                EventRequestFlags::RISING_EDGE,
+                I2C_CONSUMER,
+            )?
             .next()
             .ok_or(I2cGpioError::wait_next_edge_error(String::from("raising")))??;
 
         // And now wait for scl to return to low
         self.scl
-            .falling_edge()?
+            .events(
+                LineRequestFlags::INPUT,
+                EventRequestFlags::FALLING_EDGE,
+                I2C_CONSUMER,
+            )?
             .next()
             .ok_or(I2cGpioError::wait_next_edge_error(String::from("falling")))??;
 
@@ -413,17 +445,25 @@ impl I2cGpioSlave {
 
     pub fn ack(&mut self) -> Result<(), anyhow::Error> {
         // Request the sda line to low
-        self.sda.output(0).with_context(|| {
-            I2cGpioError::ack_error(String::from("failed to switch sda to output"))
-        })?;
+        let sda_handle = self
+            .sda
+            .request(LineRequestFlags::OUTPUT, 0, I2C_CONSUMER)
+            .with_context(|| {
+                I2cGpioError::ack_error(String::from("failed to switch sda to output"))
+            })?;
 
         self.wait_up_down_cycle()
             .with_context(|| I2cGpioError::ack_error(String::from("wait up down cycle failed")))?;
 
+        drop(sda_handle);
         // Move sda back to open drain. Stop driving value
-        self.sda.input().with_context(|| {
-            I2cGpioError::ack_error(String::from("failed to switch sda back to input"))
-        })
+        self.sda
+            .request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)
+            .with_context(|| {
+                I2cGpioError::ack_error(String::from("failed to switch sda back to input"))
+            })?;
+
+        Ok(())
     }
 
     pub fn nack(&mut self) -> Result<(), anyhow::Error> {
@@ -432,26 +472,36 @@ impl I2cGpioSlave {
     }
 
     pub fn read_master_ack(&mut self) -> Result<u8, anyhow::Error> {
-        self.sda.input()?;
+        // self.sda.input()?;
+        let sda_handle = self.sda.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
 
         self.scl
-            .rising_edge()?
+            .events(
+                LineRequestFlags::INPUT,
+                EventRequestFlags::RISING_EDGE,
+                I2C_CONSUMER,
+            )?
+            // .rising_edge()?
             .next()
             .ok_or(I2cGpioError::wait_next_edge_error(String::from("raising")))??;
 
-        self.sda.get_value()
+        Ok(sda_handle.get_value()?)
     }
 
     pub fn wait_stop(&mut self) -> Result<(), anyhow::Error> {
-        self.scl.input()?;
+        let scl_handle = self.scl.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
 
         self.sda
-            .rising_edge()?
+            .events(
+                LineRequestFlags::INPUT,
+                EventRequestFlags::RISING_EDGE,
+                I2C_CONSUMER,
+            )?
             .next()
             .ok_or(I2cGpioError::wait_next_edge_error(String::from("falling")))
             .with_context(|| I2cGpioError::wait_stop_error())??;
 
-        match self.scl.get_value()? {
+        match scl_handle.get_value()? {
             1 => Ok(()),
             _ => Err(anyhow!(
                 "scl was not low when sda droped low and waiting for stop condition"
