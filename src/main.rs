@@ -1,3 +1,4 @@
+use anyhow::Context;
 use gpio_cdev::Chip;
 use i2c_slave_gpio::{I2CSlaveOp, I2cGpioSlave};
 use quicli::prelude::CliResult;
@@ -14,7 +15,7 @@ struct Cli {
 }
 
 fn do_main(args: Cli) -> Result<(), anyhow::Error> {
-    let mut chip = Chip::new(args.chip)?;
+    let mut chip = Chip::new(args.chip.clone()).context(format!("unable to create chip from {}", args.chip))?;
 
     let mut last_read_byte = 1_u8;
 

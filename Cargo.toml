@@ -3,7 +3,7 @@ name = "i2c-slave-gpio"
 version = "0.1.0"
 edition = "2021"
 description = "gpio based i2c slave"
-homepage = "https://github.com/Fymyte/i2c-slave-gpio"
+homepage = "https://github.com/Fymyte/i2c-slave-gpio-rs"
 license-file = "LICENSE.txt"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
