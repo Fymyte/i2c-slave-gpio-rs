@@ -40,12 +40,16 @@ impl Display for LineErrorInfo {
 pub struct I2cGpioError(#[from] I2cGpioErrorKind);
 
 impl I2cGpioError {
-    fn request_error(line_info: LineErrorInfo) -> Self {
-        I2cGpioErrorKind::LineInfoError(line_info).into()
+    fn request_error(line_info: LineErrorInfo, additional_info: Option<String>) -> Self {
+        I2cGpioErrorKind::LineRequestError(
+            line_info,
+            additional_info.or(Some("".to_owned())).unwrap(),
+        )
+        .into()
     }
 
     fn info_error(line_info: LineErrorInfo) -> Self {
-        I2cGpioErrorKind::LineRequestError(line_info).into()
+        I2cGpioErrorKind::LineInfoError(line_info).into()
     }
 
     fn wait_start_error() -> Self {
@@ -83,8 +87,8 @@ impl I2cGpioError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum I2cGpioErrorKind {
-    #[error("request error for line {0}")]
-    LineRequestError(LineErrorInfo),
+    #[error("request error for line {0}{1}")]
+    LineRequestError(LineErrorInfo, String),
     #[error("failed to retrieve info for line {0}")]
     LineInfoError(LineErrorInfo),
     #[error("failed to wait for i2c start event")]
@@ -149,8 +153,9 @@ impl GpioLine {
                     self.line
                         .request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)
                         .with_context(|| {
-                            I2cGpioError::info_error(
+                            I2cGpioError::request_error(
                                 (self.name.as_str(), self.line.offset()).into(),
+                                Some(" (requested output)".to_owned()),
                             )
                         })?,
                     LineDirection::In,
@@ -183,6 +188,7 @@ impl GpioLine {
                         .with_context(|| {
                             I2cGpioError::request_error(
                                 (self.name.as_str(), self.line.offset()).into(),
+                                Some(" (requested output)".to_owned()),
                             )
                         })?,
                     LineDirection::Out,
@@ -213,25 +219,34 @@ impl GpioLine {
             }
             _ => Err(I2cGpioError::request_error(
                 (self.name.as_str(), self.line.offset()).into(),
+                None,
             ))?,
         }
     }
 
     pub fn rising_edge(&mut self) -> Result<&mut LineEventHandle, anyhow::Error> {
         Ok(match &mut self.handle {
-            HandleVariant::Events(inner, EventType::RisingEdge) => inner,
+            HandleVariant::Events(inner, EventType::RisingEdge) => {
+                log::debug!("line {} already in rising edge", self.name);
+                inner
+            }
             handle @ _ => {
-                let inner = self
-                    .line
-                    .events(
-                        LineRequestFlags::INPUT,
-                        EventRequestFlags::RISING_EDGE,
-                        I2C_CONSUMER,
-                    )
-                    .with_context(|| {
-                        I2cGpioError::request_error((self.name.as_str(), self.line.offset()).into())
-                    })?;
-                *handle = HandleVariant::Events(inner, EventType::RisingEdge);
+                log::debug!("watching rising edge events on line {}", self.name);
+                *handle = HandleVariant::Events(
+                    self.line
+                        .events(
+                            LineRequestFlags::INPUT,
+                            EventRequestFlags::RISING_EDGE,
+                            I2C_CONSUMER,
+                        )
+                        .with_context(|| {
+                            I2cGpioError::request_error(
+                                (self.name.as_str(), self.line.offset()).into(),
+                                Some(" (requested rising edge)".to_owned()),
+                            )
+                        })?,
+                    EventType::RisingEdge,
+                );
                 if let HandleVariant::Events(inner, EventType::RisingEdge) = handle {
                     inner
                 } else {
@@ -243,19 +258,27 @@ impl GpioLine {
 
     pub fn falling_edge(&mut self) -> Result<&mut LineEventHandle, anyhow::Error> {
         Ok(match &mut self.handle {
-            HandleVariant::Events(inner, EventType::FallingEdge) => inner,
+            HandleVariant::Events(inner, EventType::FallingEdge) => {
+                log::debug!("line {} already in falling edge", self.name);
+                inner
+            }
             handle @ _ => {
-                let inner = self
-                    .line
-                    .events(
-                        LineRequestFlags::INPUT,
-                        EventRequestFlags::FALLING_EDGE,
-                        I2C_CONSUMER,
-                    )
-                    .with_context(|| {
-                        I2cGpioError::request_error((self.name.as_str(), self.line.offset()).into())
-                    })?;
-                *handle = HandleVariant::Events(inner, EventType::FallingEdge);
+                log::debug!("watching falling edge events on line {}", self.name);
+                *handle = HandleVariant::Events(
+                    self.line
+                        .events(
+                            LineRequestFlags::INPUT,
+                            EventRequestFlags::FALLING_EDGE,
+                            I2C_CONSUMER,
+                        )
+                        .with_context(|| {
+                            I2cGpioError::request_error(
+                                (self.name.as_str(), self.line.offset()).into(),
+                                Some(" (requested rising edge)".to_owned()),
+                            )
+                        })?,
+                    EventType::FallingEdge,
+                );
                 if let HandleVariant::Events(inner, EventType::FallingEdge) = handle {
                     inner
                 } else {
