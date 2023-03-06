@@ -44,14 +44,17 @@ fn do_main(args: Cli) -> Result<(), anyhow::Error> {
                 log::debug!("acked message");
             }
             I2CSlaveOp::Write(addr) => {
-                log::info!("Detected writting at address {addr}");
                 i2c_slave.ack()?;
-                log::debug!("acked address");
+                log::info!("Detected writting at address {addr}");
                 i2c_slave.write_byte(last_read_byte)?;
-                i2c_slave.nack()?;
-                log::debug!("nacked message");
+                // Continue sending byte while master request it
+                while i2c_slave.read_master_ack()? == 0 {
+                    i2c_slave.write_byte(last_read_byte)?
+                }
             }
         }
+
+        i2c_slave.wait_stop()?;
     }
 }
 

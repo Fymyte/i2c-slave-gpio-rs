@@ -1,6 +1,6 @@
 use std::{fmt::Display, mem::size_of};
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use gpio_cdev::{
     Chip, EventRequestFlags, EventType, Line, LineDirection, LineEventHandle, LineHandle,
     LineRequestFlags,
@@ -52,6 +52,10 @@ impl I2cGpioError {
         I2cGpioErrorKind::WaitStartError.into()
     }
 
+    fn wait_stop_error() -> Self {
+        I2cGpioErrorKind::WaitStopError.into()
+    }
+
     fn wait_next_edge_error(edge: String) -> Self {
         I2cGpioErrorKind::WaitNextEdge(edge).into()
     }
@@ -85,6 +89,8 @@ pub enum I2cGpioErrorKind {
     LineInfoError(LineErrorInfo),
     #[error("failed to wait for i2c start event")]
     WaitStartError,
+    #[error("failed to wait for i2c stop event")]
+    WaitStopError,
     #[error("failed to wait for next {0} edge")]
     WaitNextEdge(String),
     #[error("failed to read byte from master")]
@@ -376,6 +382,7 @@ impl I2cGpioSlave {
             },
         )
     }
+
     pub fn ack(&mut self) -> Result<(), anyhow::Error> {
         // Request the sda line to low
         self.sda.output(0).with_context(|| {
@@ -390,8 +397,40 @@ impl I2cGpioSlave {
             I2cGpioError::ack_error(String::from("failed to switch sda back to input"))
         })
     }
+
     pub fn nack(&mut self) -> Result<(), anyhow::Error> {
         self.wait_up_down_cycle()
             .with_context(|| I2cGpioError::nack_error(String::from("wait up down cycle failed")))
+    }
+
+    pub fn read_master_ack(&mut self) -> Result<u8, anyhow::Error> {
+        self.sda.input()?;
+
+        self.scl
+            .rising_edge()?
+            .next()
+            .ok_or(I2cGpioError::wait_next_edge_error(String::from("raising")))??;
+
+        self.sda.get_value()
+    }
+
+    pub fn wait_stop(&mut self) -> Result<(), anyhow::Error> {
+        self.scl.input()?;
+
+        self.sda
+            .rising_edge()?
+            .next()
+            .ok_or(I2cGpioError::wait_next_edge_error(String::from("falling")))
+            .with_context(|| I2cGpioError::wait_stop_error())??;
+
+        if self.scl.get_value()? == 1 {
+            Ok(())
+        } else {
+            // Err("")
+            Err(anyhow!(
+                "scl was not low when sda droped low and waiting for stop condition"
+            ))
+            .with_context(|| I2cGpioError::wait_stop_error())
+        }
     }
 }
