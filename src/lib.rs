@@ -279,21 +279,25 @@ impl I2cGpioSlave {
         let sda_line = chip.get_line(sda)?;
         Ok(Self {
             scl: GpioLine::new(scl_line, String::from("scl"))?,
-            sda: GpioLine::new(sda_line, String::from("sda"))?, // buffer: String::from("Hello, World").into(),
+            sda: GpioLine::new(sda_line, String::from("sda"))?,
+            // buffer: String::from("Hello, World").into(),
         })
     }
 
     pub fn wait_start(&mut self) -> Result<(), anyhow::Error> {
+        log::debug!("before scl input");
         self.scl
             .input()
             .with_context(|| I2cGpioError::wait_start_error())?;
+        log::debug!("after scl input");
 
-        // Wait for sda to drop to low with  scl still high
+        // Wait for sda to drop to low with scl still high
         for _event in self
             .sda
             .falling_edge()
             .with_context(|| I2cGpioError::wait_start_error())?
         {
+            log::debug!("in loop for falling edge");
             return match self.scl.get_value() {
                 // Sda dropped low and scl is still high => Start condition
                 Ok(1) => Ok(()),
@@ -318,6 +322,7 @@ impl I2cGpioSlave {
             .enumerate()
         {
             match (line_value, (byte >> (6 - nr)) & 1) {
+                // Don't call set_value if we continue to drive the same
                 (before, now) if before == now => (),
                 (_, now) => {
                     line_value = now;
@@ -423,14 +428,12 @@ impl I2cGpioSlave {
             .ok_or(I2cGpioError::wait_next_edge_error(String::from("falling")))
             .with_context(|| I2cGpioError::wait_stop_error())??;
 
-        if self.scl.get_value()? == 1 {
-            Ok(())
-        } else {
-            // Err("")
-            Err(anyhow!(
+        match self.scl.get_value()? {
+            1 => Ok(()),
+            _ => Err(anyhow!(
                 "scl was not low when sda droped low and waiting for stop condition"
             ))
-            .with_context(|| I2cGpioError::wait_stop_error())
+            .with_context(|| I2cGpioError::wait_stop_error()),
         }
     }
 }

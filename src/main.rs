@@ -47,14 +47,16 @@ fn do_main(args: Cli) -> Result<(), anyhow::Error> {
                 i2c_slave.ack()?;
                 log::info!("Detected writting at address {addr}");
                 i2c_slave.write_byte(last_read_byte)?;
-                // Continue sending byte while master request it
+                // Continue sending byte while master requests it
                 while i2c_slave.read_master_ack()? == 0 {
                     i2c_slave.write_byte(last_read_byte)?
                 }
             }
         }
 
-        i2c_slave.wait_stop()?;
+        if let Err(e) = i2c_slave.wait_stop() {
+            log::error!("{e}")
+        }
     }
 }
 
