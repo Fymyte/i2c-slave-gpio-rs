@@ -361,7 +361,9 @@ impl I2cGpioSlave {
             .take(7)
             .enumerate()
         {
-            match (line_value, (byte >> (6 - nr)) & 1) {
+            let value =  (byte >> (6 - nr)) & 1;
+            log::info!("write bit: {value} (nr {nr} for byte: 0x{byte:x?})");
+            match (line_value, value) {
                 // Don't call set_value if we continue to drive the same
                 (before, now) if before == now => (),
                 (_, now) => {

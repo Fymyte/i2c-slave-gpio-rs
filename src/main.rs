@@ -53,17 +53,24 @@ fn do_main(args: Cli) -> Result<(), anyhow::Error> {
 
             I2CSlaveOp::Write(slave_addr) => {
                 i2c_slave.ack()?;
-                log::info!("Detected writting for address {slave_addr}");
+                log::info!("Detected writting for address {slave_addr:x?}");
+                let mut nb_byte = 0;
                 let value = *data.get(&slave_addr).unwrap_or(&0);
                 // Increase address to simulate cursor move
                 addr += 1;
+                log::info!("sending 0x{value:x?}");
+                nb_byte += 1;
                 i2c_slave.write_byte(value)?;
                 // Continue sending byte while master requests it
                 while i2c_slave.read_master_ack()? == 0 {
                     let value = *data.get(&addr).unwrap_or(&0);
                     addr += 1;
+                    log::info!("sending 0x{value:x?}");
+                    nb_byte += 1;
                     i2c_slave.write_byte(value)?
                 }
+
+                log::info!("master stoped asking for data after sending {nb_byte} bytes");
             }
         }
 
