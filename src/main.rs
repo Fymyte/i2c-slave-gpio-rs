@@ -55,7 +55,7 @@ fn do_main(args: Cli) -> Result<(), anyhow::Error> {
                 i2c_slave.ack()?;
                 log::info!("Detected writting for address {slave_addr:x?}");
                 let mut nb_byte = 0;
-                let value = *data.get(&slave_addr).unwrap_or(&0);
+                let value = *data.get(&addr).unwrap_or(&0);
                 // Increase address to simulate cursor move
                 addr += 1;
                 log::info!("sending 0x{value:x?}");
