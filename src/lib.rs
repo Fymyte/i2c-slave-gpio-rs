@@ -401,7 +401,7 @@ impl I2cGpioSlave {
             let value = sda_handle.get_value()?;
             // We shift of (7 - nr) because we receive MSB first
             byte |= value << (byte_size - 1 - nr);
-            log::info!("read bit: {value} (byte: {byte:x?})");
+            log::info!("read bit: {value} (byte: 0x{byte:x?})");
         }
 
         Ok(byte)
