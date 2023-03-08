@@ -1,10 +1,7 @@
 use std::{fmt::Display, mem::size_of};
 
 use anyhow::{anyhow, Context};
-use gpio_cdev::{
-    Chip, EventRequestFlags, EventType, Line, LineDirection, LineEventHandle, LineHandle,
-    LineRequestFlags,
-};
+use gpio_cdev::{Line, Chip, LineRequestFlags, EventRequestFlags};
 
 const I2C_CONSUMER: &str = "i2c-gpio-sqn";
 
@@ -40,17 +37,6 @@ impl Display for LineErrorInfo {
 pub struct I2cGpioError(#[from] I2cGpioErrorKind);
 
 impl I2cGpioError {
-    fn request_error(line_info: LineErrorInfo, additional_info: Option<String>) -> Self {
-        I2cGpioErrorKind::LineRequestError(
-            line_info,
-            additional_info.or(Some("".to_owned())).unwrap(),
-        )
-        .into()
-    }
-
-    // fn info_error(line_info: LineErrorInfo) -> Self {
-    //     I2cGpioErrorKind::LineInfoError(line_info).into()
-    // }
 
     fn wait_start_error() -> Self {
         I2cGpioErrorKind::WaitStartError.into()
@@ -116,186 +102,9 @@ pub enum I2CSlaveOp {
 }
 
 #[derive(Debug)]
-enum HandleVariant {
-    Normal(LineHandle, LineDirection),
-    Events(LineEventHandle, EventType),
-}
-
-#[derive(Debug)]
-pub struct GpioLine {
-    name: String,
-    line: Line,
-    handle: HandleVariant,
-}
-
-impl GpioLine {
-    // fn new(line: Line, name: String) -> Result<Self, gpio_cdev::Error> {
-    //     let handle = line.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
-    //     Ok(Self {
-    //         name,
-    //         line,
-    //         handle: HandleVariant::Normal(handle, LineDirection::In),
-    //     })
-    // }
-
-    // pub fn direction(&self) -> Option<LineDirection> {
-    //     self.dir
-    // }
-
-    pub fn input(&mut self) -> Result<(), anyhow::Error> {
-        match &mut self.handle {
-            HandleVariant::Normal(_, LineDirection::In) => {
-                log::debug!("line {} already in input", self.name)
-            }
-            handle @ _ => {
-                log::debug!("switching line {} to input", self.name);
-                *handle = HandleVariant::Normal(
-                    self.line
-                        .request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)
-                        .with_context(|| {
-                            I2cGpioError::request_error(
-                                (self.name.as_str(), self.line.offset()).into(),
-                                Some(" (requested output)".to_owned()),
-                            )
-                        })?,
-                    LineDirection::In,
-                );
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn output(&mut self, value: u8) -> Result<(), anyhow::Error> {
-        match &mut self.handle {
-            HandleVariant::Normal(inner, LineDirection::Out) => {
-                log::debug!(
-                    "driving line {} {}",
-                    self.name,
-                    if value > 0 { "high" } else { "low" }
-                );
-                inner.set_value(value)?
-            }
-            handle @ _ => {
-                log::debug!(
-                    "start driving line {} {}",
-                    self.name,
-                    if value > 0 { "high" } else { "low" }
-                );
-                *handle = HandleVariant::Normal(
-                    self.line
-                        .request(LineRequestFlags::OUTPUT, value, I2C_CONSUMER)
-                        .with_context(|| {
-                            I2cGpioError::request_error(
-                                (self.name.as_str(), self.line.offset()).into(),
-                                Some(" (requested output)".to_owned()),
-                            )
-                        })?,
-                    LineDirection::Out,
-                );
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn get_value(&self) -> Result<u8, anyhow::Error> {
-        Ok(match &self.handle {
-            HandleVariant::Normal(inner, _) => inner.get_value()?,
-            HandleVariant::Events(inner, _) => inner.get_value()?,
-        })
-    }
-
-    pub fn set_value(&self, value: u8) -> Result<(), anyhow::Error> {
-        match &self.handle {
-            HandleVariant::Normal(inner, LineDirection::Out) => {
-                log::debug!(
-                    "driving line {} {}",
-                    self.name,
-                    if value > 0 { "high" } else { "low" }
-                );
-                inner.set_value(value)?;
-                Ok(())
-            }
-            _ => Err(I2cGpioError::request_error(
-                (self.name.as_str(), self.line.offset()).into(),
-                None,
-            ))?,
-        }
-    }
-
-    pub fn rising_edge(&mut self) -> Result<&mut LineEventHandle, anyhow::Error> {
-        Ok(match &mut self.handle {
-            HandleVariant::Events(inner, EventType::RisingEdge) => {
-                log::debug!("line {} already in rising edge", self.name);
-                inner
-            }
-            handle @ _ => {
-                log::debug!("watching rising edge events on line {}", self.name);
-                *handle = HandleVariant::Events(
-                    self.line
-                        .events(
-                            LineRequestFlags::INPUT,
-                            EventRequestFlags::RISING_EDGE,
-                            I2C_CONSUMER,
-                        )
-                        .with_context(|| {
-                            I2cGpioError::request_error(
-                                (self.name.as_str(), self.line.offset()).into(),
-                                Some(" (requested rising edge)".to_owned()),
-                            )
-                        })?,
-                    EventType::RisingEdge,
-                );
-                if let HandleVariant::Events(inner, EventType::RisingEdge) = handle {
-                    inner
-                } else {
-                    panic!("")
-                }
-            }
-        })
-    }
-
-    pub fn falling_edge(&mut self) -> Result<&mut LineEventHandle, anyhow::Error> {
-        Ok(match &mut self.handle {
-            HandleVariant::Events(inner, EventType::FallingEdge) => {
-                log::debug!("line {} already in falling edge", self.name);
-                inner
-            }
-            handle @ _ => {
-                log::debug!("watching falling edge events on line {}", self.name);
-                *handle = HandleVariant::Events(
-                    self.line
-                        .events(
-                            LineRequestFlags::INPUT,
-                            EventRequestFlags::FALLING_EDGE,
-                            I2C_CONSUMER,
-                        )
-                        .with_context(|| {
-                            I2cGpioError::request_error(
-                                (self.name.as_str(), self.line.offset()).into(),
-                                Some(" (requested falling edge)".to_owned()),
-                            )
-                        })?,
-                    EventType::FallingEdge,
-                );
-                if let HandleVariant::Events(inner, EventType::FallingEdge) = handle {
-                    inner
-                } else {
-                    panic!("")
-                }
-            }
-        })
-    }
-}
-
-#[derive(Debug)]
 pub struct I2cGpioSlave {
-    // scl: GpioLine,
-    // sda: GpioLine,
     scl: Line,
     sda: Line,
-    // buffer: Vec<u8>,
 }
 
 impl I2cGpioSlave {
@@ -305,9 +114,6 @@ impl I2cGpioSlave {
         Ok(Self {
             scl: scl_line,
             sda: sda_line,
-            // scl: GpioLine::new(scl_line, String::from("scl"))?,
-            // sda: GpioLine::new(sda_line, String::from("sda"))?,
-            // buffer: String::from("Hello, World").into(),
         })
     }
 
@@ -346,7 +152,6 @@ impl I2cGpioSlave {
         let sda_handle = self
             .sda
             .request(LineRequestFlags::OUTPUT, line_value, I2C_CONSUMER)?;
-        // self.sda.output(line_value)?;
 
         for (nr, _event) in self
             .scl
@@ -355,20 +160,19 @@ impl I2cGpioSlave {
                 EventRequestFlags::RISING_EDGE,
                 I2C_CONSUMER,
             )
-            // .rising_edge()
             .with_context(|| I2cGpioError::write_byte_error(byte))?
             // Only seven, we already sent the first bit earlier
             .take(7)
             .enumerate()
         {
-            let value =  (byte >> (6 - nr)) & 1;
-            log::info!("write bit: {value} (nr {nr} for byte: 0x{byte:x?})");
-            match (line_value, value) {
+            let value_to_drive = (byte >> (6 - nr)) & 1;
+            log::info!("write bit: {value_to_drive} (nr {nr} for byte: 0x{byte:x?})");
+            match (line_value, value_to_drive) {
                 // Don't call set_value if we continue to drive the same
-                (before, now) if before == now => (),
-                (_, now) => {
-                    line_value = now;
-                    sda_handle.set_value(now)?
+                (line, to_drive) if line == to_drive => (),
+                (_, to_drive) => {
+                    line_value = to_drive;
+                    sda_handle.set_value(to_drive)?
                 }
             };
         }
@@ -385,7 +189,6 @@ impl I2cGpioSlave {
         let byte_size = size_of::<u8>() * 8;
 
         let sda_handle = self.sda.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
-        // self.sda.input()?;
 
         // Read sda on the next 8 scl rising edge
         for (nr, _event) in self
@@ -395,7 +198,6 @@ impl I2cGpioSlave {
                 EventRequestFlags::RISING_EDGE,
                 I2C_CONSUMER,
             )
-            // .rising_edge()
             .with_context(|| I2cGpioError::read_byte_error())?
             .take(byte_size)
             .enumerate()
@@ -474,7 +276,6 @@ impl I2cGpioSlave {
     }
 
     pub fn read_master_ack(&mut self) -> Result<u8, anyhow::Error> {
-        // self.sda.input()?;
         let sda_handle = self.sda.request(LineRequestFlags::INPUT, 0, I2C_CONSUMER)?;
 
         self.scl
@@ -483,7 +284,6 @@ impl I2cGpioSlave {
                 EventRequestFlags::RISING_EDGE,
                 I2C_CONSUMER,
             )?
-            // .rising_edge()?
             .next()
             .ok_or(I2cGpioError::wait_next_edge_error(String::from("raising")))??;
 
