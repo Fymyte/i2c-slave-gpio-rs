@@ -1,1 +1,4 @@
 /target
+
+# bitbake receipe
+*.bb
