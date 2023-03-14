@@ -211,6 +211,19 @@ impl I2cGpioSlave {
         Ok(byte)
     }
 
+    fn wait_next_down(&mut self) -> Result<(), anyhow::Error> {
+        // Wait for the next clock edge
+        self.scl
+            .events(
+                LineRequestFlags::INPUT,
+                EventRequestFlags::FALLING_EDGE,
+                I2C_CONSUMER,
+            )?
+            .next()
+            .ok_or(I2cGpioError::wait_next_edge_error(String::from("falling")))??;
+        Ok(())
+    }
+
     fn wait_up_down_cycle(&mut self) -> Result<(), anyhow::Error> {
         // Wait for the next clock edge
         self.scl
@@ -248,6 +261,7 @@ impl I2cGpioSlave {
     }
 
     pub fn ack(&mut self) -> Result<(), anyhow::Error> {
+        self.wait_next_down()?;
         // Request the sda line to low
         let sda_handle = self
             .sda
