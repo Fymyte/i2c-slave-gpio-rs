@@ -152,6 +152,7 @@ impl I2cGpioSlave {
         let sda_handle = self
             .sda
             .request(LineRequestFlags::OUTPUT, line_value, I2C_CONSUMER)?;
+        log::info!("write bit: {line_value} (nr 0 for byte: 0x{byte:x?})");
 
         for (nr, _event) in self
             .scl
@@ -166,7 +167,7 @@ impl I2cGpioSlave {
             .enumerate()
         {
             let value_to_drive = (byte >> (6 - nr)) & 1;
-            log::info!("write bit: {value_to_drive} (nr {nr} for byte: 0x{byte:x?})");
+            log::info!("write bit: {value_to_drive} (nr {} for byte: 0x{byte:x?})", nr + 1);
             match (line_value, value_to_drive) {
                 // Don't call set_value if we continue to drive the same
                 (line, to_drive) if line == to_drive => (),
