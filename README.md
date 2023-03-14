@@ -2,8 +2,8 @@
 
 This slave will respond to any address.
 The lib is designed to work with GPIOs which uses INPUT to achieve open-drain.
-This means that lines are requested as input to drive a *1* on the line, and output to low
-to drive a *0*.
+This means that lines are requested as input to drive a **1** on the line, and output to low
+to drive a **0**.
 
 ## Usage
 ```
